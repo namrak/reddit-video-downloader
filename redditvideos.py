@@ -84,6 +84,20 @@ class RedditDownloader:
             if not os.path.exists(self.folder_path):
                 os.makedirs(self.folder_path)
 
+            if media_data is None:
+                # might be gif, check for gif params, else no video or gif, return
+                try:
+                    gif_url = data[0]["data"]["children"][0]["data"]["preview"]["images"][0]["variants"]["gif"]["source"]["url"]
+                    os.system("curl -o video.gif {}".format(gif_url))
+                    os.system("ffmpeg -r 30 -i video.gif -movflags faststart -pix_fmt yuv420p -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" \"{}\"".format(self.video_path))
+                    self.open_output_dir()
+                except Exception as err:
+                    messagebox.showerror("Error", err)
+                    e_type, exc_obj, exc_tb = sys.exc_info()
+                    print(err, e_type, "\nLine Number:", exc_tb.tb_lineno)
+                finally:
+                    return
+
             video_url = media_data["reddit_video"]["fallback_url"]
             audio_url = video_url.split("DASH_")[0] + "audio"
             print("Video URL: ", video_url)
@@ -107,7 +121,7 @@ class RedditDownloader:
         except Exception as err:
             messagebox.showerror("Error", err)
             e_type, exc_obj, exc_tb = sys.exc_info()
-            print(err, e_type, exc_tb.tb_lineno)
+            print(err, e_type, "\nLine Number:", exc_tb.tb_lineno)
 
     def quit(self):
         self.win.destroy()
