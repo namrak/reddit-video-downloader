@@ -78,6 +78,9 @@ class RedditDownloader:
             # sanitize title
             for char in string.punctuation:
                 title = title.replace(char, "")
+            # account for titles that are too long
+            if len(title) > 50:
+                title = title[0:49]
 
             self.video_path  = os.path.join(real_path, "Output", title)+".mp4"
             self.folder_path = os.path.join(real_path, "Output")
@@ -89,10 +92,10 @@ class RedditDownloader:
                 try:
                     gif_url = data[0]["data"]["children"][0]["data"]["preview"]["images"][0]["variants"]["gif"]["source"]["url"]
                     os.system("curl -o video.gif {}".format(gif_url))
-                    os.system("ffmpeg -r 30 -i video.gif -movflags faststart -pix_fmt yuv420p -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" \"{}\"".format(self.video_path))
+                    os.system("ffmpeg -i video.gif -movflags faststart -pix_fmt yuv420p -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" \"{}\"".format(self.video_path))
                     self.open_output_dir()
                 except Exception as err:
-                    messagebox.showerror("Error", err)
+                    messagebox.showerror("Error", "No video or gif")
                     e_type, exc_obj, exc_tb = sys.exc_info()
                     print(err, e_type, "\nLine Number:", exc_tb.tb_lineno)
                 finally:
