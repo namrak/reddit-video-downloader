@@ -102,14 +102,16 @@ class RedditDownloader:
                     return
 
             video_url = media_data["reddit_video"]["fallback_url"]
-            audio_url = video_url.split("DASH_")[0] + "audio"
+            audio_url = video_url.split("DASH_")[0] + "DASH_audio.mp4"
             print("Video URL: ", video_url)
+            print("Audio URL: ", audio_url)
             # add ffmpeg bin directory to PATH environment variable or full path to binary when ffmpeg is called with os.system()
             try:
                 urlopen(audio_url)
             except HTTPError as err:
                 if err.code == 403:
                     # no audio, download video only
+                    print("\nno audio url\n")
                     os.system("curl -o video.mp4 {}".format(video_url))
                     os.system("ffmpeg -y -i video.mp4 -c:v copy -strict experimental \"{}\"".format(self.video_path))
                     self.open_output_dir()
