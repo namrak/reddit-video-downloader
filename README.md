@@ -31,7 +31,7 @@ Added error notice
 
 Added support for videos without audio
 
-Videos that are crossposted will yield a "'NoneType' object is not subscriptable"
+Videos that are crossposted will yield a "'NoneType' object is not subscriptable" error
 
 Simplified download logic
 

@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# Windows 10 build 17063 required for native curl
 from tkinter import Entry,Button,Tk,messagebox
 import tkinter.font as tkFont
 import tkinter.ttk
