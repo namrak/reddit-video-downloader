@@ -55,7 +55,6 @@ class RedditDownloader:
             self.resolve_vreddit_url()
 
     def resolve_vreddit_url(self):
-        
         self.url = requests.get(self.url, headers=self.headers).url
         self.reddit_downloader()
 
@@ -74,16 +73,18 @@ class RedditDownloader:
             data = requests.get(json_url, headers=self.headers).json()
             media_data = data[0]["data"]["children"][0]["data"]["media"]
             title = data[0]["data"]["children"][0]["data"]["title"]
-
-            # sanitize title
+            
+            # sanitize title for file path
             for char in string.punctuation:
                 title = title.replace(char, "")
             # account for titles that are too long
             if len(title) > 50:
                 title = title[0:49]
 
-            self.video_path  = os.path.join(real_path, "Output", title)+".mp4"
             self.folder_path = os.path.join(real_path, "Output")
+            self.video_path  = os.path.join(self.folder_path, title)+".mp4"
+            self.gif_path = os.path.join(self.folder_path, title)+".gif"
+            
             if not os.path.exists(self.folder_path):
                 os.makedirs(self.folder_path)
 
@@ -91,8 +92,9 @@ class RedditDownloader:
                 # might be gif, check for gif params, else no video or gif, return
                 try:
                     gif_url = data[0]["data"]["children"][0]["data"]["preview"]["images"][0]["variants"]["gif"]["source"]["url"]
-                    os.system("curl -o video.gif {}".format(gif_url))
-                    os.system("ffmpeg -i video.gif -movflags faststart -pix_fmt yuv420p -vf \"scale=trunc(iw/2)*2:trunc(ih/2)*2\" \"{}\"".format(self.video_path))
+                    gif_request = requests.get(gif_url, headers=self.headers)
+                    with open(self.gif_path, "wb") as output_gif:
+                        output_gif.write(gif_request.content)
                     self.open_output_dir()
                 except Exception as err:
                     messagebox.showerror("Error", "No video or gif")
@@ -101,28 +103,11 @@ class RedditDownloader:
                 finally:
                     return
 
-            video_url = media_data["reddit_video"]["fallback_url"]
-            audio_url = video_url.split("DASH_")[0] + "DASH_audio.mp4"
-            print("Video URL: ", video_url)
-            print("Audio URL: ", audio_url)
-            # add ffmpeg bin directory to PATH environment variable or full path to binary when ffmpeg is called with os.system()
-            try:
-                urlopen(audio_url)
-            except HTTPError as err:
-                if err.code == 403:
-                    # no audio, download video only
-                    print("\nno audio url\n")
-                    os.system("curl -o video.mp4 {}".format(video_url))
-                    os.system("ffmpeg -y -i video.mp4 -c:v copy -strict experimental \"{}\"".format(self.video_path))
-                    self.open_output_dir()
-                    return
+            dash_url = media_data["reddit_video"]["dash_url"]
+            dash_url = dash_url.split("?")[0]
 
-            os.system("curl -o video.mp4 {}".format(video_url))
-            os.system("curl -o audio.wav {}".format(audio_url))
-
-            os.system("ffmpeg -y -i video.mp4 -i audio.wav -c:v copy -c:a aac -strict experimental \"{}\"".format(self.video_path))
+            os.system("ffmpeg -y -i {} -c copy \"{}\"".format(dash_url, self.video_path))
             self.open_output_dir()
-            return
         except Exception as err:
             messagebox.showerror("Error", err)
             e_type, exc_obj, exc_tb = sys.exc_info()

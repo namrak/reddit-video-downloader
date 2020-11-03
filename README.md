@@ -5,11 +5,11 @@ If there is already an URL in the clipboard it will use it, try to download the 
 
 Else: it starts the gui and you can download whatever you want from reddit.
 
-Linux requirements: Supported applications for clipboard feature (xclip or xsel), ffmpeg bin path added to BIN variable, python3-tk
+Linux requirements: Supported applications for clipboard feature (xclip or xsel), ffmpeg bin path added to PATH variable, python3-tk
 
 `sudo apt-get install xclip ffmpeg python3-tk`
 
-Windows requirements: Windows 10 build 17063 required for native curl, ffmpeg bin path added to PATH variable
+Windows requirements: Tested only on Windows 10, curl no longer needed, ffmpeg bin path added to PATH variable
 
 MacOS requirements: Brew allows easy install of ffmpeg/xclip (xclip also requires xquartz)
 
@@ -32,6 +32,8 @@ Added error notice
 Added support for videos without audio
 
 Videos that are crossposted will yield a "'NoneType' object is not subscriptable"
+
+Simplified download logic
 
 Here is a screenshot to show you the wonderful GUI that comes with it :
 ![screenshot](https://i.imgur.com/NOkrFTZ.png)
