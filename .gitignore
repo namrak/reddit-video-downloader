@@ -1,0 +1,7 @@
+/env
+/Output
+video.mp4
+video.gif
+audio.wav
+/.vs
+*.pyc
