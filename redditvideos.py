@@ -17,21 +17,61 @@ class RedditDownloader:
     """Handles the downloading and processing of Reddit videos and GIFs."""
     
     def __init__(self):
+        # Using a more standard browser User-Agent as it's less likely to be blocked for HTML fetching
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "From": "reddit-video-downloader@example.com"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0"
         }
         self.output_dir = Path(__file__).parent / "Output"
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def sanitize_title(self, title):
         """Sanitizes the post title to be used as a filename."""
+        if not title:
+             return "reddit_video"
+        # Decode HTML entities if any
+        title = title.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&#39;", "'")
         # Remove characters that are not letters, numbers, spaces, or hyphens
         title = re.sub(r'[^\w\s-]', '', title).strip()
         # Replace multiple spaces with a single space
         title = re.sub(r'\s+', ' ', title)
         # Limit length to 50 characters to avoid path issues
         return title[:50]
+
+    def get_metadata_from_html(self, url):
+        """Fallback method to scrape metadata from HTML when JSON fails."""
+        try:
+            response = requests.get(url, headers=self.headers, timeout=10)
+            response.raise_for_status()
+            html = response.text
+            
+            metadata = {}
+            
+            # Extract Title
+            title_match = re.search(r'<title>(.*?) : .*?</title>', html)
+            if not title_match:
+                title_match = re.search(r'<title>(.*?)</title>', html)
+            metadata["title"] = title_match.group(1) if title_match else "reddit_video"
+            
+            # Extract Video URLs
+            dash_match = re.search(r'https://v\.redd\.it/[^/]+/DASHPlaylist\.mpd', html)
+            hls_match = re.search(r'https://v\.redd\.it/[^/]+/HLSPlaylist\.m3u8', html)
+            fallback_match = re.search(r'https://v\.redd\.it/[^/]+/fallback', html)
+            
+            if dash_match:
+                metadata["dash_url"] = dash_match.group(0)
+            if hls_match:
+                metadata["hls_url"] = hls_match.group(0)
+            if fallback_match:
+                metadata["fallback_url"] = fallback_match.group(0)
+                
+            # Extract GIF URL
+            gif_match = re.search(r'https://i\.redd\.it/[^"]+\.gif', html)
+            if gif_match:
+                metadata["gif_url"] = gif_match.group(0)
+                
+            return metadata
+        except Exception as e:
+            raise Exception(f"Failed to scrape Reddit HTML: {e}")
 
     def get_json_data(self, url):
         """Fetches and parses JSON data for a Reddit post."""
@@ -41,8 +81,9 @@ class RedditDownloader:
             response = requests.get(clean_url, headers=self.headers, timeout=10)
             response.raise_for_status()
             return response.json()
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"Failed to fetch Reddit data: {e}")
+        except requests.exceptions.RequestException:
+            # If JSON fails, we'll try HTML scraping in the main download method
+            return None
 
     def resolve_vreddit_url(self, url):
         """Resolves v.redd.it short URLs to their full Reddit post URLs."""
@@ -66,85 +107,106 @@ class RedditDownloader:
 
         if status_callback: status_callback("Fetching metadata...")
         data = self.get_json_data(url)
+        
+        metadata = {}
+        is_gif = False
 
-        try:
-            # Reddit API returns a list of two objects for posts
-            post_data = data[0]["data"]["children"][0]["data"]
-            title = self.sanitize_title(post_data.get("title", "reddit_video"))
-            media = post_data.get("media")
-            
-            # Check for GIF variants first if no standard media object exists
-            if not media:
-                try:
-                    # Attempt to find a GIF source
-                    gif_url = post_data["preview"]["images"][0]["variants"]["gif"]["source"]["url"]
-                    # Reddit HTML-escapes & in URLs in the JSON
-                    gif_url = gif_url.replace("&amp;", "&")
-                    
-                    if status_callback: status_callback("Downloading GIF...")
-                    gif_path = self.output_dir / f"{title}.gif"
-                    
-                    response = requests.get(gif_url, headers=self.headers, stream=True)
-                    response.raise_for_status()
-                    with open(gif_path, "wb") as f:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            f.write(chunk)
-                    
-                    return gif_path
-                except (KeyError, IndexError):
-                    raise Exception("No video or GIF found in this post.")
+        if data:
+            try:
+                # Reddit API returns a list of two objects for posts
+                post_data = data[0]["data"]["children"][0]["data"]
+                metadata["title"] = post_data.get("title", "reddit_video")
+                media = post_data.get("media")
+                
+                if media and media.get("reddit_video"):
+                    video_data = media.get("reddit_video")
+                    metadata["dash_url"] = video_data.get("dash_url", "").split("?")[0]
+                    metadata["fallback_url"] = video_data.get("fallback_url", "").split("?")[0]
+                else:
+                    # Check for GIF variants
+                    try:
+                        gif_url = post_data["preview"]["images"][0]["variants"]["gif"]["source"]["url"]
+                        metadata["gif_url"] = gif_url.replace("&amp;", "&")
+                        is_gif = True
+                    except (KeyError, IndexError):
+                        pass
+            except (KeyError, IndexError, TypeError):
+                pass
 
-            video_data = media.get("reddit_video")
-            if not video_data:
-                raise Exception("Could not find video data in the media object.")
+        # If JSON failed or yielded no metadata, try HTML scraping
+        if not metadata or (not metadata.get("dash_url") and not metadata.get("gif_url")):
+            if status_callback: status_callback("JSON blocked, scraping HTML...")
+            html_metadata = self.get_metadata_from_html(url)
+            metadata.update(html_metadata)
+            if "gif_url" in html_metadata and not html_metadata.get("dash_url"):
+                is_gif = True
 
-            # Prefer DASH URL for best quality and audio sync
-            dash_url = video_data.get("dash_url", "").split("?")[0]
-            if not dash_url:
-                # Fallback to direct video URL
-                dash_url = video_data.get("fallback_url", "").split("?")[0]
-            
-            if not dash_url:
-                raise Exception("Could not find video stream URL.")
+        if not metadata:
+            raise Exception("Could not find video or GIF data for this post.")
 
-            video_path = self.output_dir / f"{title}.mp4"
-            
-            if status_callback: status_callback("Downloading video (ffmpeg)...")
-            
-            # Use ffmpeg to process the DASH stream. 
-            # It handles audio/video muxing automatically from the manifest.
-            cmd = [
-                "ffmpeg", "-y", "-i", dash_url, 
-                "-c", "copy", "-movflags", "faststart", str(video_path)
-            ]
-            
-            # Set creationflags to hide console window on Windows
-            creation_flags = 0
-            if platform.system() == "Windows":
-                creation_flags = subprocess.CREATE_NO_WINDOW
+        title = self.sanitize_title(metadata.get("title", "reddit_video"))
 
-            result = subprocess.run(
-                cmd, 
-                capture_output=True, 
-                text=True, 
-                creationflags=creation_flags
-            )
+        if is_gif and metadata.get("gif_url"):
+            if status_callback: status_callback("Downloading GIF...")
+            gif_path = self.output_dir / f"{title}.gif"
+            
+            response = requests.get(metadata["gif_url"], headers=self.headers, stream=True)
+            response.raise_for_status()
+            with open(gif_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            return gif_path
+
+        # Handle Video
+        hls_url = metadata.get("hls_url")
+        dash_url = metadata.get("dash_url")
+        if not dash_url:
+            dash_url = metadata.get("fallback_url")
+        
+        # Prefer DASH as it provided the full duration in previous tests
+        video_source = dash_url if dash_url else hls_url
+        
+        if not video_source:
+            raise Exception("Could not find video stream URL.")
+
+        video_path = self.output_dir / f"{title}.mp4"
+        
+        if status_callback: status_callback("Downloading video (ffmpeg)...")
+        
+        # Use ffmpeg to process the stream. 
+        # Re-encoding to libx264/aac ensures maximum compatibility and fixes bitstream issues seen with some DASH sources.
+        # This also ensures the full duration is captured correctly.
+        cmd = [
+            "ffmpeg", "-y", "-i", video_source, 
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "faststart", str(video_path)
+        ]
+        
+        creation_flags = 0
+        if platform.system() == "Windows":
+            creation_flags = subprocess.CREATE_NO_WINDOW
+
+        result = subprocess.run(
+            cmd, 
+            capture_output=True, 
+            text=True, 
+            creationflags=creation_flags
+        )
+        
+        if result.returncode != 0:
+            # Try fallback_url if dash failed
+            fallback_url = metadata.get("fallback_url")
+            if fallback_url and dash_url != fallback_url:
+                 if status_callback: status_callback("DASH failed, trying fallback...")
+                 cmd[3] = fallback_url
+                 result = subprocess.run(cmd, capture_output=True, text=True, creationflags=creation_flags)
             
             if result.returncode != 0:
-                # If ffmpeg failed, it might be due to DASH issues. Try fallback_url if we haven't already.
-                fallback_url = video_data.get("fallback_url", "").split("?")[0]
-                if dash_url != fallback_url:
-                     if status_callback: status_callback("DASH failed, trying fallback...")
-                     cmd[3] = fallback_url
-                     result = subprocess.run(cmd, capture_output=True, text=True, creationflags=creation_flags)
-                
-                if result.returncode != 0:
-                    raise Exception(f"ffmpeg error: {result.stderr}")
+                raise Exception(f"ffmpeg error: {result.stderr}")
 
-            return video_path
-
-        except (KeyError, IndexError, TypeError) as e:
-            raise Exception(f"Error parsing Reddit response: {e}")
+        return video_path
 
     def open_folder(self, path):
         """Opens the folder containing the downloaded file in the system file explorer."""
